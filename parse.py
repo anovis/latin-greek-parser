@@ -9,7 +9,7 @@ import csv
 import betacode.conv
 
 REQUESTS_PER_SEC = 20
-FIELDS = ['id', 'cap', 'verse', 'line', 'index', 'word', 'lang', 'form', 'lemma', 'expandedForm', 'pos', 'person', 'number', 'tense', 'mood', 'voice', 'dialect', 'feature','case','gender',"degree", "len"]
+FIELDS = ['id', 'cap', 'verse', 'line', 'index', 'word', 'lang', 'form', 'lemma', 'expandedForm', 'pos', 'person', 'number', 'tense', 'mood', 'voice', 'dialect', 'feature','case','gender',"degree", "len",'mintLabel', 'startDate', 'endDate', 'legend', 'denLabel']
 LIMIT = False #20
 
 def bezae_codex_extractor(soup):
@@ -36,6 +36,33 @@ def convert_html(filename):
 def read_txt(filename):
     for line in open(filename):
         yield line.strip()
+
+
+def split_legend(legend_name, datum, word_dict):
+    legend_list = []
+    for i, word in enumerate(datum[legend_name].split()):
+        word_dict[word] = {"freq": word_dict.get(word,{}).get("freq",0) + 1}
+        legend_list.append({
+            "index":i+1,
+            "word":word,
+            "legend": legend_name,
+            "startDate": datum["startDate"],
+            "endDate":datum["endDate"],
+            "mintLabel":datum["mintLabel"],
+            "denLabel":datum["denLabel"],
+        })
+        # legend_dict[f"word_{legend_name}_{i}"] = word
+    return legend_list
+
+def split_words_coins(file_reader):
+    word_dict = {}
+    lines = []
+
+    for datum in file_reader:
+        lines.extend(split_legend("reVerseLegend",datum,word_dict))
+        lines.extend(split_legend("obVerseLegend",datum,word_dict))
+
+    return lines, word_dict
 
 
 
@@ -135,6 +162,7 @@ def extract_analysis(analyses):
     
     if isinstance(analyses["analysis"], list):
         analysis = analyses["analysis"][0]
+        # TODO: add support for multiple lines
         extracted_analysis["len"] = len(analyses["analysis"])
     else:
         analysis = analyses["analysis"] 
@@ -175,22 +203,40 @@ def write_word_translatations(json_words, filename):
     with open(filename, "w") as f:
        f.write(json.dumps(json_words))
 
+
+SPLITTERS = {
+    "coins" : split_words_coins,
+    "default" : split_words
+}
+
+
 if __name__ == "__main__":
 
     if not len(sys.argv) >1:
         raise ValueError("missing html or txt file")
     filename = sys.argv[1]
+    reader = None
+
     if "html" in filename:
         convert_html(html_file)
 
-    if "txt" in filename:
-        if sys.argv[2]:
-            lang = sys.argv[2]
-        else:
-            "la" 
+    # if "txt" in filename:
+    if sys.argv[2]:
+        lang = sys.argv[2]
+    else:
+        "la" 
 
-        prefix = filename.split(".")[0]
-        words, word_dict = split_words(filename)
-        t_words, t_word_dict = add_translations(words, word_dict,lang)
-        write_csv(t_words,FIELDS, prefix + '.csv'),
-        write_word_translatations(t_word_dict,prefix + "-words.json" )
+    if sys.argv[3]:
+        splitter = SPLITTERS.get(sys.argv[3],"default")
+    else:
+        splitter = SPLITTERS["default"]
+
+    if "csv" in filename:
+        with open(filename) as f:
+            reader = csv.DictReader(f)
+
+            prefix = filename.split(".")[0]
+            words, word_dict = splitter(reader or filename)
+            t_words, t_word_dict = add_translations(words, word_dict,lang)
+            write_csv(t_words,FIELDS, prefix + '-output.csv'),
+            write_word_translatations(t_word_dict,prefix + "-words.json" )
